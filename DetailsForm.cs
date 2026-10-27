@@ -8,11 +8,11 @@ namespace UsageLimitViewer;
 internal sealed class DetailsForm : Form
 {
     private const int LogicalWidth = 272, HeaderHeight = 44, Pad = 8, Gap = 6, CardPad = 12;
-    private const int TitleHeight = 20, RowHeight = 48, FooterLine = 16, FoldedHeight = 34, MaxListHeight = 460;
+    private const int TitleHeight = 20, LoginRow = 30, RowHeight = 48, FooterLine = 16, FoldedHeight = 34, MaxListHeight = 460;
     private static readonly Color Surface = Color.FromArgb(32, 32, 32), Border = Color.FromArgb(62, 62, 62);
     private static readonly Color CardFill = Color.FromArgb(43, 43, 43), CardHover = Color.FromArgb(50, 50, 50), CardBorder = Color.FromArgb(58, 58, 58);
     private static readonly Color Ink = Color.White, Muted = Color.FromArgb(200, 200, 200), Faint = Color.FromArgb(150, 150, 150);
-    private static readonly Color Track = Color.FromArgb(64, 64, 64), Accent = Color.FromArgb(76, 194, 255);
+    private static readonly Color Track = Color.FromArgb(64, 64, 64), Accent = Color.FromArgb(76, 194, 255), Amber = Color.FromArgb(252, 225, 0);
 
     private readonly Preferences prefs;
     private readonly System.Windows.Forms.Timer clock = new() { Interval = 1000 };
@@ -37,6 +37,10 @@ internal sealed class DetailsForm : Form
     internal event Action? RefreshRequested;
     // Raised after a drag changed which services sit in the first two places, i.e. the taskbar's two rows.
     internal event Action? TaskbarChanged;
+    // The "Sign in" button on a card whose service needs signing in again.
+    internal event Action? LoginRequested;
+    private readonly Dictionary<string, Rectangle> loginButtons = [];
+    private bool hoverLogin;
     internal Func<Rectangle?>? TrayBounds;
 
     private sealed record Card(Reading Reading, bool Foldable, bool Folded, int Height)
@@ -155,6 +159,7 @@ internal sealed class DetailsForm : Form
     {
         if (folded) return S(FoldedHeight);
         int rows = reading.Quotas.Count == 0 ? S(34) : reading.Quotas.Count * S(RowHeight) + S(FooterLine);
+        if (reading.NeedsLogin && reading.Quotas.Count > 0) rows += S(LoginRow);
         return S(CardPad) + S(TitleHeight) + S(6) + rows + S(CardPad) - S(2);
     }
 
@@ -169,7 +174,8 @@ internal sealed class DetailsForm : Form
         var ordered = OrderedReadings(prefs, codex, agy, claude, grok).ToList();
         cards = ordered.Select(r =>
         {
-            bool foldable = ordered.IndexOf(r) >= 2;
+            // A card that needs signing in stays open so its Sign in button is in view.
+            bool foldable = ordered.IndexOf(r) >= 2 && !r.NeedsLogin;
             bool folded = foldable && !openedProviders.Contains(r.Provider);
             return new Card(r, foldable, folded, CardHeight(r, folded));
         }).ToList();
@@ -203,6 +209,7 @@ internal sealed class DetailsForm : Form
         g.Clear(Surface);
         if (!expanded) { PaintCompact(g); return; }
         var list = ListBounds;
+        loginButtons.Clear();
         var state = g.Save();
         g.SetClip(list);
         foreach (var card in cards)
@@ -340,6 +347,7 @@ internal sealed class DetailsForm : Form
         int width = right - x;
         if (reading.Quotas.Count == 0)
         {
+            if (reading.NeedsLogin) { PaintLogin(g, reading.Provider, x, y, width, lifted); return; }
             TextRenderer.DrawText(g, reading.Error ?? L.T("接続しています…"), small, new Rectangle(x, y, width, S(30)), Faint,
                 TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
             return;
@@ -372,8 +380,27 @@ internal sealed class DetailsForm : Form
             y += S(RowHeight);
         }
         var age = reading.Updated?.ToLocalTime().ToString("MM/dd HH:mm:ss") ?? "—";
-        TextRenderer.DrawText(g, L.F("取得 {age}", ("age", age)) + (reading.Error == null ? "" : L.T(" · 更新できません")), small,
+        TextRenderer.DrawText(g, L.F("取得 {age}", ("age", age)) + (reading.Error == null || reading.NeedsLogin ? "" : L.T(" · 更新できません")), small,
             new Rectangle(x, y, width, S(15)), Faint, TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        if (reading.NeedsLogin) PaintLogin(g, reading.Provider, x, y + S(FooterLine), width, lifted);
+    }
+
+    // "The sign-in has run out" with a Sign in button on the right. The cursor stays the arrow (it is a button, not a link).
+    private void PaintLogin(Graphics g, string provider, int x, int y, int width, bool lifted)
+    {
+        using var small = UiFont(11);
+        using var label = UiFont(11, true);
+        string text = L.T("ログイン");
+        int buttonWidth = TextRenderer.MeasureText(g, text, label, Size.Empty, TextFormatFlags.NoPadding).Width + S(20);
+        var button = new Rectangle(x + width - buttonWidth, y + S(3), buttonWidth, S(LoginRow - 6));
+        TextRenderer.DrawText(g, L.T("ログインが切れています"), small, new Rectangle(x, y, width - buttonWidth - S(8), S(LoginRow)), Amber,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        bool hover = hoverLogin && !lifted && loginButtons.TryGetValue(provider, out var last) && last == button;
+        using (var fill = new SolidBrush(hover ? Color.FromArgb(100, 206, 255) : Accent))
+        using (var shape = Rounded(button, S(4)))
+            g.FillPath(fill, shape);
+        TextRenderer.DrawText(g, text, label, button, Color.Black, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        if (!lifted) loginButtons[provider] = button;
     }
 
     // Plenty left: accent blue; getting low: amber; nearly gone: red.
@@ -392,6 +419,9 @@ internal sealed class DetailsForm : Form
         using var border = new Pen(Border);
         g.DrawRectangle(border, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
     }
+
+    // The provider whose Sign in button is under the point (buttons are only on cards that are on screen).
+    private string? LoginButtonAt(Point p) => ListBounds.Contains(p) ? loginButtons.FirstOrDefault(b => b.Value.Contains(p)).Key : null;
 
     private Card? CardAt(Point p)
     {
@@ -413,7 +443,8 @@ internal sealed class DetailsForm : Form
         }
         var button = expanded ? Buttons().FirstOrDefault(b => b.Bounds.Contains(e.Location)).Id : null;
         var card = expanded ? CardAt(e.Location)?.Reading.Provider : null;
-        if (button != hoverButton || card != hoverCard) { hoverButton = button; hoverCard = card; Invalidate(); }
+        bool overLogin = expanded && LoginButtonAt(e.Location) != null;
+        if (button != hoverButton || card != hoverCard || overLogin != hoverLogin) { hoverButton = button; hoverCard = card; hoverLogin = overLogin; Invalidate(); }
         if (button != tipButton)
         {
             tipButton = button;
@@ -441,6 +472,11 @@ internal sealed class DetailsForm : Form
         if (dragging != null) { FinishDrag(); return; }
         var card = pressed;
         pressed = null;
+        if (card != null && LoginButtonAt(e.Location) == card.Reading.Provider && LoginButtonAt(pressPoint) == card.Reading.Provider)
+        {
+            LoginRequested?.Invoke();
+            return;
+        }
         if (card != null && card == CardAt(e.Location))
         {
             if (card.Foldable) ToggleFold(card);

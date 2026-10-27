@@ -13,7 +13,7 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
-    <AssemblyName>UsageLimitViewer</AssemblyName><Product>Usage Limit Viewer</Product><Title>Usage Limit Viewer</Title><AssemblyTitle>Usage Limit Viewer</AssemblyTitle><IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion><Version>2.0.3</Version><Description>Usage Limit Viewer</Description><Company>hinatamaxxx</Company><Authors>hinatamaxxx</Authors><Copyright>Copyright (c) hinatamaxxx</Copyright>
+    <AssemblyName>UsageLimitViewer</AssemblyName><Product>Usage Limit Viewer</Product><Title>Usage Limit Viewer</Title><AssemblyTitle>Usage Limit Viewer</AssemblyTitle><IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion><Version>2.0.4</Version><Description>Usage Limit Viewer</Description><Company>hinatamaxxx</Company><Authors>hinatamaxxx</Authors><Copyright>Copyright (c) hinatamaxxx</Copyright>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />

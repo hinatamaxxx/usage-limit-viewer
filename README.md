@@ -76,7 +76,7 @@ CodexとClaudeで5時間枠と週間枠がある場合は、「20%(80%)」のよ
 
 ## Claudeの残量が表示されない場合
 
-まず、Claude Code CLIで`claude auth login`を実行し、ログインを確認してください。通常は、そのログイン情報を使って5時間・週間の残量を取得します。残量はアカウント全体の値なので、Claude DesktopやWeb版での利用も反映されます。
+まず、Claude Code CLIで`claude auth login`を実行し、ログインを確認してください。ログインが切れているときは、通知と「使用状況」の「ログイン」ボタン（右クリックメニューの「Claude Code にログイン」）から、ログイン画面を開けます。ログインが終わると、すぐに残量を取り直します。通常は、そのログイン情報を使って5時間・週間の残量を取得します。残量はアカウント全体の値なので、Claude DesktopやWeb版での利用も反映されます。
 
 自動取得に使うAnthropicのAPIは非公開で、仕様変更により取得できなくなる場合があります。その場合は、[公式status line](https://code.claude.com/docs/en/statusline)の連携を有効にすると、Claude Code CLIの応答後に届く残量を表示できます。PowerShellで次を一度実行してください。
 
