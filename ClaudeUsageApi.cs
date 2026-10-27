@@ -6,6 +6,12 @@ using System.Text.Json;
 
 namespace UsageLimitViewer;
 
+// The Claude Code CLI sign-in is missing, expired or refused: only signing in again (claude auth login) fixes it.
+internal sealed class ClaudeLoginRequiredException : IOException
+{
+    internal ClaudeLoginRequiredException() : base(L.T("Claude Code のログインが切れています")) { }
+}
+
 // Reads the account-wide Claude quota with the Claude Code CLI sign-in, so it also reflects Claude Desktop usage.
 // The token is only sent to api.anthropic.com and is never stored or logged by this app.
 internal static class ClaudeUsageApi
@@ -55,7 +61,7 @@ internal static class ClaudeUsageApi
     {
         if (LoadCache() is { } cached && DateTimeOffset.UtcNow - cached.Updated < (force ? ManualInterval : MinimumInterval)) return cached;
         if (DateTimeOffset.UtcNow < retryAfter) throw new IOException(L.T("Claudeの使用状況の取得を一時的に控えています"));
-        var token = ReadToken() ?? throw new IOException(L.T("Claude Code CLIでログインしてください"));
+        var token = ReadToken() ?? throw new ClaudeLoginRequiredException();
         // The CLI only renews its sign-in when it calls the model, so an idle CLI leaves the token expired.
         if (token.Expires <= DateTimeOffset.UtcNow.AddMinutes(5)) token = await Renew(token, stop);
         var response = await SendUsage(token.Access, stop);
@@ -75,7 +81,7 @@ internal static class ClaudeUsageApi
             throw new IOException(L.T("Claudeの使用状況の取得を一時的に控えています"));
         }
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            throw new IOException(L.T("Claude Code CLIで再ログインしてください"));
+            throw new ClaudeLoginRequiredException();
         if (!response.IsSuccessStatusCode) throw new IOException(L.T("Claudeの使用状況を取得できません"));
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var now = DateTimeOffset.UtcNow;
@@ -122,7 +128,7 @@ internal static class ClaudeUsageApi
     // Renews the CLI sign-in the way the CLI does and writes it back, so the CLI keeps working with the rotated refresh token.
     private static async Task<Token> Renew(Token token, CancellationToken stop)
     {
-        if (token.Refresh == null) throw new IOException(L.T("Claude Code CLIで再ログインしてください"));
+        if (token.Refresh == null) throw new ClaudeLoginRequiredException();
         var body = new Dictionary<string, string> { ["grant_type"] = "refresh_token", ["refresh_token"] = token.Refresh, ["client_id"] = ClientId };
         if (token.Scopes.Length > 0) body["scope"] = string.Join(" ", token.Scopes);
         using var response = await Http.PostAsync(TokenUrl, new StringContent(JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json"), stop);
@@ -130,7 +136,7 @@ internal static class ClaudeUsageApi
         {
             // Another process (the CLI) may have rotated the refresh token first; use its fresh sign-in if so.
             if (ReadToken() is { } latest && latest.Expires > DateTimeOffset.UtcNow.AddMinutes(1)) return latest;
-            throw new IOException(L.T("Claude Code CLIで再ログインしてください"));
+            throw new ClaudeLoginRequiredException();
         }
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var now = DateTimeOffset.UtcNow;
@@ -140,7 +146,7 @@ internal static class ClaudeUsageApi
         var temp = CredentialsPath + ".usage-limit-viewer.tmp";
         File.WriteAllText(temp, updated, new System.Text.UTF8Encoding(false));
         UsageLimitViewer.Compat.MoveOver(temp, CredentialsPath);
-        return ParseToken(updated) ?? throw new IOException(L.T("Claude Code CLIで再ログインしてください"));
+        return ParseToken(updated) ?? throw new ClaudeLoginRequiredException();
     }
 
     // Updates only the renewed fields and keeps everything else the CLI stored.

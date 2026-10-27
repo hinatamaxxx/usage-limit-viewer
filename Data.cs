@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace UsageLimitViewer;
 
 internal record Quota(string Label, double Remaining, DateTimeOffset? Reset);
-internal record Reading(string Provider, List<Quota> Quotas, DateTimeOffset? Updated, string? Error = null, string? Source = null)
+// NeedsLogin: the service refused the saved sign-in; the app offers to open its sign-in.
+internal record Reading(string Provider, List<Quota> Quotas, DateTimeOffset? Updated, string? Error = null, string? Source = null, bool NeedsLogin = false)
 {
     public bool Stale => Error != null || Updated == null || DateTimeOffset.UtcNow - Updated > TimeSpan.FromMinutes(10);
     public string Compact => Quotas.Count == 0 ? "—" : $"{Quotas.Min(q => q.Remaining):0.#}%";

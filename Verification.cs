@@ -181,6 +181,19 @@ internal static class Verification
         using (var grokDetails = new Bitmap(f.Width, f.Height)) { f.DrawToBitmap(grokDetails, f.ClientRectangle); grokDetails.Save(Path.Combine(AppContext.BaseDirectory, "preview-grok-details.png")); }
         using (var selectedGrok = ClockTextRenderer.Render(192, 72, 144, c, exampleGrok))
             selectedGrok.Save(Path.Combine(AppContext.BaseDirectory, "preview-grok-taskbar.png"));
+        // Claude signed out: once with the last values kept, once with nothing to show.
+        foreach (var (name, signedOut) in new[]
+        {
+            ("preview-login-values.png", exampleClaude with { Error = L.T("Claude Code のログインが切れています"), NeedsLogin = true }),
+            ("preview-login-empty.png", new Reading("Claude Code", [], null, L.T("Claude Code のログインが切れています"), NeedsLogin: true)),
+        })
+        {
+            f.UpdateReadings(c, a, signedOut, null, false);
+            f.Expand(true, false); Application.DoEvents();
+            using var shot = new Bitmap(f.Width, f.Height);
+            f.DrawToBitmap(shot, f.ClientRectangle);
+            shot.Save(Path.Combine(AppContext.BaseDirectory, name));
+        }
         f.Hide();
         RenderMenu(Path.Combine(AppContext.BaseDirectory, "preview-menu.png"));
         using (var exit = new AppDialog(L.T("Usage Limit Viewer を終了しますか？"), L.T("終了すると、タスクバーの残量表示と定期的な更新が止まります。"), primary: L.T("終了する"), cancel: L.T("キャンセル")))

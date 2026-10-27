@@ -104,7 +104,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly UpdateState updateState = Updater.LoadState();
     private ReleaseInfo? available;          // A newer release found while automatic updates are off.
     private string? restartInto;             // The updated exe, started once no window of this app is open.
-    private bool busy, closing, hoverOpened, forceQueued, confirmingExit, updating;
+    private bool busy, closing, hoverOpened, forceQueued, confirmingExit, updating, claudeLoginNotified;
+    private Action? balloonClick;            // What clicking the last notification does.
 
     internal TrayApplicationContext(bool openPanel = false)
     {
@@ -167,7 +168,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             if (updateState.LastCheck is not { } last || DateTimeOffset.UtcNow - last >= due) _ = CheckForUpdate(manual: false);
         };
         form.VisibleChanged += (_, _) => { if (!form.Visible && restartInto != null) RestartWhenIdle(); };
-        tray.BalloonTipClicked += (_, _) => { if (available != null) _ = CheckForUpdate(manual: true); };
+        tray.BalloonTipClicked += (_, _) => balloonClick?.Invoke();
+        form.LoginRequested += OpenClaudeLogin;
 
         poll.Start();
         hoverClose.Start();
@@ -189,6 +191,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         // A new version is announced here only when automatic updates are off; otherwise it just installs itself.
         if (!prefs.AutoUpdate && available is { } release)
             entries.Add(new(L.F("このアプリの新しい版 v{version} に更新", ("version", release.Version.ToString(3))), () => _ = CheckForUpdate(manual: true), Enabled: !updating));
+        if (claude?.NeedsLogin == true) entries.Add(new(L.T("Claude Code にログイン"), OpenClaudeLogin));
         entries.Add(MenuEntry.Separator);
         entries.Add(new(L.T("使用状況を開く"), OpenPanel, Default: true));
         entries.Add(new(L.T("残量を今すぐ取得"), () => _ = Refresh(force: true), Enabled: !busy));
@@ -296,6 +299,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             else if (available?.Version != release.Version)
             {
                 available = release;
+                balloonClick = () => _ = CheckForUpdate(manual: true);
                 TrayPresentation.Notify(tray, L.F("このアプリの新しい版 v{version} があります", ("version", release.Version.ToString(3))), L.T("クリックすると更新します。"));
             }
             updateState.Failures = 0;
@@ -370,17 +374,43 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private async Task RefreshClaude(bool force)
     {
         // Prefer the account-wide API; fall back to the status line snapshot, keeping the last values grayed out on failure.
-        try { claude = await ClaudeUsageApi.ReadLive(stop.Token, force); return; }
+        try
+        {
+            claude = await ClaudeUsageApi.ReadLive(stop.Token, force);
+            claudeLoginNotified = false;
+            return;
+        }
         catch (Exception e)
         {
             Reading? snapshot;
             try { snapshot = ClaudeCodeUsage.ReadSnapshot(); } catch (Exception) { snapshot = null; }
             var message = e is OperationCanceledException ? L.T("取得がタイムアウトしました")
                 : e is IOException or HttpRequestException ? e.Message : L.T("Claudeの使用状況を取得できません");
-            if (snapshot is { Quotas.Count: > 0 } && !snapshot.Stale) claude = snapshot;
-            else if (claude is { Quotas.Count: > 0 }) claude = claude with { Error = message };
-            else claude = snapshot is { Quotas.Count: > 0 } ? snapshot : new Reading("Claude Code", [], null, message);
+            bool needsLogin = e is ClaudeLoginRequiredException;
+            if (snapshot is { Quotas.Count: > 0 } && !snapshot.Stale) claude = snapshot with { NeedsLogin = needsLogin };
+            else if (claude is { Quotas.Count: > 0 }) claude = claude with { Error = message, NeedsLogin = needsLogin };
+            else claude = snapshot is { Quotas.Count: > 0 } ? snapshot with { NeedsLogin = needsLogin } : new Reading("Claude Code", [], null, message, NeedsLogin: needsLogin);
+            // Say so once when the sign-in runs out, not on every refresh.
+            if (needsLogin && !claudeLoginNotified)
+            {
+                claudeLoginNotified = true;
+                ui.Post(_ =>
+                {
+                    balloonClick = OpenClaudeLogin;
+                    TrayPresentation.Notify(tray, L.T("Claude Code のログインが切れています"), L.T("クリックするとログイン画面を開きます。"));
+                }, null);
+            }
         }
+    }
+
+    // Opens claude auth login; when its window closes, ask Claude again right away instead of waiting a minute.
+    private void OpenClaudeLogin()
+    {
+        if (closing) return;
+        var login = ClaudeLogin.Start();
+        if (login == null) return;
+        login.EnableRaisingEvents = true;
+        login.Exited += (_, _) => { login.Dispose(); ui.Post(_ => _ = Refresh(force: true), null); };
     }
     private async Task RefreshGrok(bool force)
     {
