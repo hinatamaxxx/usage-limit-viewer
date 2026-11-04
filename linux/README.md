@@ -3,6 +3,7 @@
 Windows 版と同じサービス（Codex、Antigravity CLI、Claude Code、Grok Build CLI）の残量を、KDE Plasma のタスクバーに 2 行で表示します。
 
 - **取得**: `ulv.py`。systemd のユーザーサービス `usage-limit-viewer.service` として常駐し、結果を `~/.local/share/usage-limit-viewer/state.json` に書きます。Codex と Claude は 1 分ごと、agy と grok は 3 分ごとに取得します（Windows 版と同じ）。
+- Codex は、PATH の `codex`（Codex CLI）を使います。見つからないときは、ChatGPT デスクトップアプリに同梱の Codex（`/usr/lib/chatgpt/resources/codex`）を使います。
 - **表示**: `tray-item/`。[win11-shell](https://github.com/hinatamaxxx/win11-shell) の Win11 トレイに、[トレイの部品](https://github.com/hinatamaxxx/win11-shell/blob/main/docs/tray-items.md)として足します（`~/.local/share/win11-shell/tray-items/usage-limit-viewer/`）。幅 128 の項目で、最初は「^」のすぐ右に出ます。ほかのアイコンと同じく、掴んで並べ替えられます。
 
 ## 入れ方
