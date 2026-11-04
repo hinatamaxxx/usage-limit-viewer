@@ -123,12 +123,23 @@ class Rpc:
 
 # ── Codex ───────────────────────────────────────────────────
 
+# The ChatGPT desktop app (deb) bundles the Codex CLI; it is not on PATH.
+CODEX_DESKTOP = ["/usr/lib/chatgpt/resources/codex", "/opt/ChatGPT/resources/codex"]
+
+
 def find_codex():
-    return which("codex", [os.path.join(HOME, ".local", "bin", "codex")])
+    """(path, bundled with the desktop app) — a codex on PATH first, then the one inside the ChatGPT desktop app."""
+    exe = which("codex", [os.path.join(HOME, ".local", "bin", "codex")])
+    if exe:
+        return exe, False
+    for p in CODEX_DESKTOP:
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p, True
+    return None, False
 
 
 def codex():
-    exe = find_codex()
+    exe, desktop = find_codex()
     if not exe:
         raise RuntimeError("Codexをインストールしてログインしてください")
     rpc = Rpc([exe, "app-server"])
@@ -169,7 +180,7 @@ def codex():
         bucket(result.get("rateLimits"), "")
     if not rows:
         raise RuntimeError("残量が返されませんでした")
-    return {"quotas": rows, "source": "Codex CLI経由"}
+    return {"quotas": rows, "source": "Codexアプリ経由" if desktop else "Codex CLI経由"}
 
 
 # ── Antigravity (agy) ──────────────────────────────────────
@@ -431,7 +442,7 @@ def grok():
 
 
 READERS = {"Codex": codex, "Antigravity": antigravity, "Claude Code": claude, "Grok": grok}
-INSTALLED = {"Codex": lambda: bool(find_codex()), "Claude Code": lambda: os.path.exists(CREDENTIALS) or bool(which("claude")),
+INSTALLED = {"Codex": lambda: bool(find_codex()[0]), "Claude Code": lambda: os.path.exists(CREDENTIALS) or bool(which("claude")),
              "Antigravity": lambda: bool(which("agy")), "Grok": lambda: bool(which("grok", [os.path.join(HOME, ".grok", "bin", "grok")]))}
 
 
