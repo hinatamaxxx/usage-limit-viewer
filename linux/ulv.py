@@ -6,6 +6,8 @@
   ulv.py refresh       ask the running daemon to read every service now
   ulv.py set <key> <json>  change a display setting (order: list of services, fiveHourFirst: bool)
   ulv.py login claude  open "claude auth login" in a terminal
+  ulv.py statusline    Claude Code's status line command: keeps the 5-hour and weekly limits Claude Code passes in
+  ulv.py statusline-enable   point Claude Code's status line at "ulv.py statusline" (leaves an existing one alone)
   ulv.py diagnose      read every service once and print the result
 
 The same services and the same reading rules as the Windows app (Codex, Antigravity CLI, Claude Code, Grok Build CLI).
@@ -33,6 +35,10 @@ STATE = os.path.join(DATA, "state.json")
 PIDFILE = os.path.join(DATA, "daemon.pid")
 LOCKFILE = os.path.join(DATA, "daemon.lock")
 CLAUDE_CACHE = os.path.join(DATA, "claude-usage-cache.json")
+# What Claude Code passed to its status line (rate_limits), so no API call is needed while Claude Code is in use.
+SNAPSHOT = os.path.join(DATA, "claude-code-usage.json")
+SNAPSHOT_FRESH = 300        # a status line newer than this is used as is, without asking the API
+SNAPSHOT_USABLE = 600       # an older one still stands in while the API is refusing us
 # Display settings (card order, "5-hour%(weekly%)" or the reverse); the taskbar part reads them with the state.
 SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "usage-limit-viewer", "settings.json")
 SETTING_KEYS = {"order": list, "fiveHourFirst": bool}
@@ -215,6 +221,8 @@ CREDENTIALS = os.path.join(HOME, ".claude", ".credentials.json")
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 claude_retry_after = 0.0
+claude_backoff = 0.0        # grows 2, 4, 8 ... 30 minutes while the API keeps answering 429
+API_INTERVAL = 175          # the usage API rate-limits polling every minute; ask about every 3 minutes
 
 
 def read_token():
@@ -304,12 +312,45 @@ def claude_parse(root):
     return rows
 
 
+def snapshot_reading():
+    """The limits Claude Code last passed to its status line: (rows, captured_at), or None."""
+    try:
+        with open(SNAPSHOT) as f:
+            snap = json.load(f)
+        captured = float(snap["captured_at"])
+        limits = snap["rate_limits"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    rows = []
+    for key, label in (("five_hour", "5時間"), ("seven_day", "週間")):
+        w = limits.get(key) if isinstance(limits, dict) else None
+        if not isinstance(w, dict) or not isinstance(w.get("used_percentage"), (int, float)):
+            continue
+        reset = w.get("resets_at") if isinstance(w.get("resets_at"), (int, float)) else None
+        if reset is not None and reset <= now():
+            continue   # that window has started over since; the number no longer holds
+        rows.append({"label": label, "remaining": clamp(100 - w["used_percentage"]), "reset": reset})
+    return (rows, captured) if rows else None
+
+
 def claude(force=False):
-    global claude_retry_after
+    snap = snapshot_reading()
+    if snap and now() - snap[1] < SNAPSHOT_FRESH:
+        return {"quotas": snap[0], "source": "Claude Code（statusLine）経由", "updated": snap[1]}
+    try:
+        return claude_api(force)
+    except RuntimeError:
+        if snap and now() - snap[1] < SNAPSHOT_USABLE:
+            return {"quotas": snap[0], "source": "Claude Code（statusLine）経由", "updated": snap[1]}
+        raise
+
+
+def claude_api(force=False):
+    global claude_retry_after, claude_backoff
     try:
         with open(CLAUDE_CACHE) as f:
             cache = json.load(f)
-        if now() - cache["captured_at"] < (30 if force else 55):
+        if now() - cache["captured_at"] < (30 if force else API_INTERVAL):
             return {"quotas": claude_parse(cache["usage"]), "source": "Claude Code CLI経由", "updated": cache["captured_at"]}
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -327,16 +368,19 @@ def claude(force=False):
         token = latest if latest and latest["access"] != token["access"] and latest["expires"] > now() + 60 else renew(latest or token)
         status, data, headers = claude_usage(token["access"])
     if status == 429:
+        # Retry-After often says 0; asking again right away only keeps the limit going, so wait longer each time.
         try:
-            wait = float(headers.get("Retry-After") or 120)
+            told = float(headers.get("Retry-After") or 0)
         except ValueError:
-            wait = 120
-        claude_retry_after = now() + wait
+            told = 0
+        claude_backoff = min(1800.0, max(120.0, claude_backoff * 2))
+        claude_retry_after = now() + max(told, claude_backoff)
         raise RuntimeError("Claudeの使用状況の取得を一時的に控えています")
     if status in (401, 403):
         raise LoginRequired
     if status != 200:
         raise RuntimeError("Claudeの使用状況を取得できません")
+    claude_backoff = 0.0
     usage = json.loads(data)
     rows = claude_parse(usage)
     if not rows:
@@ -449,6 +493,12 @@ def daemon():
         forced["on"] = True
         wake.set()
     signal.signal(signal.SIGUSR1, on_refresh)
+    claude_now = {"on": False}
+
+    def on_statusline(*_):
+        claude_now["on"] = True
+        wake.set()
+    signal.signal(signal.SIGUSR2, on_statusline)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
     state = load_state()
@@ -459,6 +509,9 @@ def daemon():
         forced["on"] = False
         if force:
             due = {p: 0.0 for p in PROVIDERS}
+        if claude_now["on"]:
+            claude_now["on"] = False
+            due["Claude Code"] = 0.0
         state["refreshing"] = True
         save_state(state)
         for name in PROVIDERS:
@@ -538,6 +591,72 @@ def wait(last):
         time.sleep(0.5)
 
 
+def statusline():
+    """Claude Code's status line command. Keeps rate_limits for the daemon and prints a short line."""
+    try:
+        session = json.load(sys.stdin)
+    except ValueError:
+        session = {}
+    limits = session.get("rate_limits") if isinstance(session, dict) else None
+    windows = {}
+    for key in ("five_hour", "seven_day"):
+        w = limits.get(key) if isinstance(limits, dict) else None
+        if isinstance(w, dict) and isinstance(w.get("used_percentage"), (int, float)) and 0 <= w["used_percentage"] <= 100:
+            e = {"used_percentage": w["used_percentage"]}
+            if isinstance(w.get("resets_at"), (int, float)):
+                e["resets_at"] = w["resets_at"]
+            windows[key] = e
+    if windows:
+        try:
+            with open(SNAPSHOT) as f:
+                old = json.load(f)
+        except (OSError, ValueError):
+            old = {}
+        changed = old.get("rate_limits") != windows
+        # Write when the numbers moved, or a minute later so the widget knows they are still current.
+        if changed or now() - (old.get("captured_at") or 0) > 60:
+            os.makedirs(DATA, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=DATA, prefix=".snapshot.", suffix=".tmp")
+            with os.fdopen(fd, "w") as f:
+                json.dump({"captured_at": now(), "rate_limits": windows}, f)
+            os.replace(tmp, SNAPSHOT)
+            try:
+                with open(PIDFILE) as f:
+                    os.kill(int(f.read().strip()), signal.SIGUSR2)
+            except (OSError, ValueError):
+                pass
+    parts = [f"{label} {100 - windows[k]['used_percentage']:.0f}%" for k, label in (("five_hour", "5時間"), ("seven_day", "週間")) if k in windows]
+    print("残り " + " · ".join(parts) if parts else "Claude Code")
+    return 0
+
+
+def statusline_enable():
+    path = os.path.join(HOME, ".claude", "settings.json")
+    command = f"python3 {os.path.join(HOME, '.local', 'lib', 'usage-limit-viewer', 'ulv.py')} statusline"
+    try:
+        with open(path) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        settings = {}
+    current = settings.get("statusLine")
+    if isinstance(current, dict) and current.get("command") == command:
+        print("Claude Code の statusLine はすでに Usage Limit Viewer につながっています")
+        return 0
+    if current:
+        print("Claude Code に別の statusLine があるため、変えていません。その statusLine から「" + command + "」に標準入力を渡してください")
+        return 1
+    if os.path.exists(path):
+        shutil.copy2(path, path + ".usage-limit-viewer.bak")
+    settings["statusLine"] = {"type": "command", "command": command}
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".settings.", suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, path)
+    print("Claude Code の statusLine を Usage Limit Viewer につなぎました（次の応答から残量が届きます）")
+    return 0
+
+
 def refresh():
     try:
         with open(PIDFILE) as f:
@@ -583,6 +702,10 @@ def main(argv):
         return refresh()
     if cmd == "set" and len(argv) == 3:
         return set_setting(argv[1], argv[2])
+    if cmd == "statusline":
+        return statusline()
+    if cmd == "statusline-enable":
+        return statusline_enable()
     if cmd == "login":
         return login(argv[1] if len(argv) > 1 else "")
     if cmd == "diagnose":
