@@ -6,3 +6,4 @@ dist-*/
 installer/bin/
 installer/obj/
 installer/payload.zip
+__pycache__/

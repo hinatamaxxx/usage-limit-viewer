@@ -14,6 +14,16 @@ usage-limit-viewer/linux/install.sh
 
 表示には、トレイの部品に対応した win11-shell の Win11 トレイがパネルにあることが必要です。
 
+## Claude Code の statusLine 連携（任意）
+
+Claude の残量を取る API は、問い合わせが多いと 429（問い合わせ過多）を返します。Claude Code（ターミナルの CLI）の statusLine につなぐと、Claude Code が描画のたびに渡す残量を受け取ります。届いた値が 5 分以内なら、API には問い合わせません。
+
+```bash
+python3 ~/.local/lib/usage-limit-viewer/ulv.py statusline-enable
+```
+
+`~/.claude/settings.json` に statusLine を足します（元の設定は `settings.json.usage-limit-viewer.bak` に残します）。すでに別の statusLine があるときは変更しません。ステータス行には「残り 5時間 ◯% · 週間 ◯%」と表示されます。デスクトップアプリの Claude では statusLine が呼ばれないため、その間は API から取得します（約 3 分おき。429 のときは 2・4・8 分…最大 30 分待ちます）。
+
 ## 使い方
 
 | 操作 | 動作 |
