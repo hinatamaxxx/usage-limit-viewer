@@ -4,6 +4,7 @@
   ulv.py daemon        poll the services and write state.json (run by the systemd user service)
   ulv.py wait <mtime>  print state.json once its mtime differs from <mtime> (the widget calls this in a loop)
   ulv.py refresh       ask the running daemon to read every service now
+  ulv.py set <key> <json>  change a display setting (order: list of services, fiveHourFirst: bool)
   ulv.py login claude  open "claude auth login" in a terminal
   ulv.py diagnose      read every service once and print the result
 
@@ -32,6 +33,9 @@ STATE = os.path.join(DATA, "state.json")
 PIDFILE = os.path.join(DATA, "daemon.pid")
 LOCKFILE = os.path.join(DATA, "daemon.lock")
 CLAUDE_CACHE = os.path.join(DATA, "claude-usage-cache.json")
+# Display settings (card order, "5-hour%(weekly%)" or the reverse); the taskbar part reads them with the state.
+SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "usage-limit-viewer", "settings.json")
+SETTING_KEYS = {"order": list, "fiveHourFirst": bool}
 PROVIDERS = ["Codex", "Antigravity", "Claude Code", "Grok"]
 # Codex and Claude every minute; agy and grok start a CLI, so every 3 minutes.
 INTERVALS = {"Codex": 60, "Claude Code": 60, "Antigravity": 180, "Grok": 180}
@@ -487,17 +491,48 @@ READERS_MISSING = {"Codex": "Codexをインストールしてログインして�
                    "Claude Code": "Claude Code CLIをインストールしてログインしてください", "Grok": "Grok CLIが見つかりません"}
 
 
+def load_settings():
+    try:
+        with open(SETTINGS) as f:
+            d = json.load(f)
+        return {k: v for k, v in d.items() if k in SETTING_KEYS and isinstance(v, SETTING_KEYS[k])}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def set_setting(key, value):
+    if key not in SETTING_KEYS:
+        return 2
+    v = json.loads(value)
+    if not isinstance(v, SETTING_KEYS[key]):
+        return 2
+    d = load_settings()
+    d[key] = v
+    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(SETTINGS), prefix=".settings.", suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, SETTINGS)
+    return 0
+
+
+def mtime(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return 0
+
+
 def wait(last):
-    """Print state.json (with its mtime) once it differs from <last>. Gives up after 10 minutes so the caller re-asks."""
+    """Print state.json and the settings once either file changed from <last>. Gives up after 10 minutes so the caller re-asks."""
     end = now() + 600
     while True:
-        try:
-            m = os.stat(STATE).st_mtime_ns
-        except OSError:
-            m = 0
-        if str(m) != last or now() > end:
+        m = mtime(STATE)
+        key = f"{m}-{mtime(SETTINGS)}"
+        if key != last or now() > end:
             s = load_state() if m else {"providers": {}, "missing": True}
-            s["mtime"] = str(m)
+            s["mtime"] = key
+            s["settings"] = load_settings()
             print(json.dumps(s, ensure_ascii=False))
             return 0
         time.sleep(0.5)
@@ -546,6 +581,8 @@ def main(argv):
         return wait(argv[1] if len(argv) > 1 else "")
     if cmd == "refresh":
         return refresh()
+    if cmd == "set" and len(argv) == 3:
+        return set_setting(argv[1], argv[2])
     if cmd == "login":
         return login(argv[1] if len(argv) > 1 else "")
     if cmd == "diagnose":
