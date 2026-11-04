@@ -37,7 +37,7 @@ LOCKFILE = os.path.join(DATA, "daemon.lock")
 CLAUDE_CACHE = os.path.join(DATA, "claude-usage-cache.json")
 # What Claude Code passed to its status line (rate_limits), so no API call is needed while Claude Code is in use.
 SNAPSHOT = os.path.join(DATA, "claude-code-usage.json")
-SNAPSHOT_FRESH = 300        # a status line newer than this is used as is, without asking the API
+SNAPSHOT_FRESH = 300        # status line numbers that changed within this are used as is, without asking the API
 SNAPSHOT_USABLE = 600       # an older one still stands in while the API is refusing us
 # Display settings (card order, "5-hour%(weekly%)" or the reverse); the taskbar part reads them with the state.
 SETTINGS = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "usage-limit-viewer", "settings.json")
@@ -612,9 +612,9 @@ def statusline():
                 old = json.load(f)
         except (OSError, ValueError):
             old = {}
-        changed = old.get("rate_limits") != windows
-        # Write when the numbers moved, or a minute later so the widget knows they are still current.
-        if changed or now() - (old.get("captured_at") or 0) > 60:
+        # Only a change counts as news: the status line is also redrawn without a new answer from the model, and
+        # re-stamping unchanged numbers then would pass old values off as current and keep the API from being asked.
+        if old.get("rate_limits") != windows:
             os.makedirs(DATA, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=DATA, prefix=".snapshot.", suffix=".tmp")
             with os.fdopen(fd, "w") as f:
