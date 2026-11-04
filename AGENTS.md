@@ -8,6 +8,8 @@
 - 各 AI サービスの CLI へのログイン（`codex login`、`claude auth login`、`grok login` など）は利用者に実行してもらう。ログイン情報やトークンをチャット・ファイル・リポジトリに書き出さない。
 - 利用者の Claude Code の設定（`~/.claude/settings.json`）は、利用者が希望したときだけ変更する（下の「任意の追加設定」）。
 
+Linux（KDE Plasma）の場合は、この手順ではなく [linux/README.md](linux/README.md) に従う。
+
 ## 1. 前提の確認
 
 - Windows 10 / 11 であること（`[Environment]::OSVersion`）。.NET Framework 4.8 は Windows に標準で入っているので、追加のインストールは不要。

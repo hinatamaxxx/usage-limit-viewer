@@ -105,6 +105,10 @@ In Windows **Settings → Apps → Installed apps**, select “Usage Limit Viewe
 
 To run it from a command line, use `"%LOCALAPPDATA%\Programs\UsageLimitViewer\UsageLimitViewer.exe" --uninstall --silent`. Add `--keep-settings` to keep settings.
 
+## Linux (KDE Plasma)
+
+On KDE Plasma 6 (e.g. Kubuntu), the same two-line display appears in the [win11-shell](https://github.com/hinatamaxxx/win11-shell) taskbar. See [linux/README.md](linux/README.md) (Japanese) for setup.
+
 ## Requirements and limitations
 
 - Unofficial, unsigned app for Windows 11. It runs on .NET Framework 4.8, which is part of Windows, so nothing else needs installing (the app is about 1.4 MB).

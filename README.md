@@ -107,6 +107,10 @@ Windowsの「設定」→「アプリ」→「インストールされている�
 
 コマンドで実行する場合は、`"%LOCALAPPDATA%\Programs\UsageLimitViewer\UsageLimitViewer.exe" --uninstall --silent`です。設定を残すときは`--keep-settings`を付けます。
 
+## Linux（KDE Plasma）
+
+Kubuntu などの KDE Plasma 6 では、[win11-shell](https://github.com/hinatamaxxx/win11-shell) のタスクバーに同じ 2 行の表示を出せます。入れ方は [linux/README.md](linux/README.md) を参照してください。
+
 ## 対応環境・注意事項
 
 - Windows 11向けの非公式・未署名アプリです。Windowsに標準で入っている.NET Framework 4.8で動くため、追加のインストールは不要です（アプリは約1.4MB）。
