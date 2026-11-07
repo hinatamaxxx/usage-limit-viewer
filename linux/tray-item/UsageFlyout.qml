@@ -13,6 +13,7 @@ FlyoutWindow {
     property real tick: Date.now()     // 「あと◯日」を 1 分ごとに出し直す
 
     openDuration: Fluent.normal
+    closeDuration: 0            // 閉じるときはアニメーションなしで、すぐ消す
     contentWidth: card.width + side * 2
     contentHeight: card.height + side + 12
 
