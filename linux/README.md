@@ -25,6 +25,10 @@ python3 ~/.local/lib/usage-limit-viewer/ulv.py statusline-enable
 
 `~/.claude/settings.json` に statusLine を足します（元の設定は `settings.json.usage-limit-viewer.bak` に残します）。すでに別の statusLine があるときは変更しません。ステータス行には「残り 5時間 ◯% · 週間 ◯%」と表示されます。デスクトップアプリの Claude では statusLine が呼ばれないため、その間は API から取得します（約 3 分おき。429 のときは 2・4・8 分…最大 30 分待ちます）。
 
+## モデルごとの枠（Fable など）
+
+Claude には、週間の枠の中に、特定のモデルだけに適用される上限があります（例: 「週間 · Fable」）。そのモデルを使うと、週間全体とそのモデルの枠の両方が減ります。別に追加される枠ではありません。こうした枠は「使用状況」のカードに表示し、タスクバーの 2 行には全体の枠だけを表示します。statusLine から値をもらっている間も、10 分に 1 回だけ API に問い合わせて、モデルごとの枠を補います。
+
 ## 使い方
 
 | 操作 | 動作 |

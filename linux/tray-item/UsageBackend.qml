@@ -54,7 +54,9 @@ Item {
     // ── 表示の文字 ─────────────────────────
     // 「5時間」と「週間」の両方がある（Claude Code、Codex の一部のプラン）ときは「20%(80%)」、それ以外は最も少ない枠
     function compact(r) {
-        const q = r.quotas || []
+        // モデルごとの枠（「週間 · Fable」など）は、そのモデルを使うときだけの上限なので、タスクバーには出さない（「使用状況」に出す）
+        const all = r.quotas || []
+        const q = all.some(x => x.label.indexOf(" · ") < 0) ? all.filter(x => x.label.indexOf(" · ") < 0) : all
         if (q.length === 0) return "—"
         const five = q.find(x => x.label === "5時間"), week = q.find(x => x.label === "週間")
         if (five && week) {
