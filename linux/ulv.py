@@ -320,7 +320,37 @@ def claude_parse(root):
         if reset is None and key.startswith("seven_day_"):
             continue
         rows.append({"label": label, "remaining": clamp(100 - w["utilization"]), "reset": reset})
+    # Limits that apply to one model only, e.g. Fable: a cap inside the weekly limit ("週間 · Fable"). Using that model
+    # counts toward both the weekly limit and its own cap.
+    for lim in (root.get("limits") if isinstance(root, dict) else None) or []:
+        if not isinstance(lim, dict) or not str(lim.get("kind", "")).endswith("_scoped"):
+            continue
+        window = {"weekly": "週間", "five_hour": "5時間"}.get(lim.get("group"))
+        model = ((lim.get("scope") or {}).get("model") or {}).get("display_name")
+        if not window or not model or not isinstance(lim.get("percent"), (int, float)):
+            continue
+        label = f"{window} · {model}"
+        reset = iso_epoch(lim.get("resets_at"))
+        if (reset is not None and reset <= now()) or any(r["label"] == label for r in rows):
+            continue
+        rows.append({"label": label, "remaining": clamp(100 - lim["percent"]), "reset": reset})
     return rows
+
+
+SCOPED_REFRESH = 600        # while the status line feeds us, still ask the API this often for the per-model limits
+SCOPED_USABLE = 1800        # per-model limits from the API are shown alongside the status line up to this age
+
+
+def scoped_rows():
+    """Per-model limits ("週間 · Fable" ...) from the last API answer; the status line does not carry them."""
+    try:
+        with open(CLAUDE_CACHE) as f:
+            cache = json.load(f)
+        if now() - cache["captured_at"] < SCOPED_USABLE:
+            return [r for r in claude_parse(cache["usage"]) if " · " in r["label"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return []
 
 
 def snapshot_reading():
@@ -347,12 +377,23 @@ def snapshot_reading():
 def claude(force=False):
     snap = snapshot_reading()
     if snap and now() - snap[1] < SNAPSHOT_FRESH:
-        return {"quotas": snap[0], "source": "Claude Code（statusLine）経由", "updated": snap[1]}
+        # The status line has the 5-hour and weekly limits; ask the API now and then for the per-model ones.
+        try:
+            with open(CLAUDE_CACHE) as f:
+                age = now() - json.load(f)["captured_at"]
+        except (OSError, ValueError, KeyError, TypeError):
+            age = float("inf")
+        if age > SCOPED_REFRESH:
+            try:
+                claude_api()
+            except (RuntimeError, LoginRequired, OSError, ValueError):
+                pass
+        return {"quotas": snap[0] + scoped_rows(), "source": "Claude Code（statusLine）経由", "updated": snap[1]}
     try:
         return claude_api(force)
     except RuntimeError:
         if snap and now() - snap[1] < SNAPSHOT_USABLE:
-            return {"quotas": snap[0], "source": "Claude Code（statusLine）経由", "updated": snap[1]}
+            return {"quotas": snap[0] + scoped_rows(), "source": "Claude Code（statusLine）経由", "updated": snap[1]}
         raise
 
 
